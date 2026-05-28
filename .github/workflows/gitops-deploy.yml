@@ -17,6 +17,7 @@ permissions:
   packages: write
 
 env:
+  GHCR_USERNAME: miguelsilva04
   IMAGE_NAME: ghcr.io/miguelsilva04/devship-demo-app
   GITOPS_REPO: MiguelSilva04/devship-gitops
 
@@ -32,7 +33,7 @@ jobs:
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u GHCR_USERNAME --password-stdin
 
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG ./app
