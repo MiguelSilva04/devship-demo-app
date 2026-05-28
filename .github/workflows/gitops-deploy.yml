@@ -1,4 +1,4 @@
-name: Build and update GitOps
+name: Build and update GitOps with ECR
 
 on:
   workflow_dispatch:
@@ -14,11 +14,11 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
-  GHCR_USERNAME: miguelsilva04
-  IMAGE_NAME: ghcr.io/miguelsilva04/devship-demo-app
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "306667525254"
+  ECR_REPOSITORY: devship-demo-app
   GITOPS_REPO: MiguelSilva04/devship-gitops
 
 jobs:
@@ -32,14 +32,27 @@ jobs:
       - name: Define image tag
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITOPS_TOKEN }}" | docker login ghcr.io -u $GHCR_USERNAME --password-stdin
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build Docker image
-        run: docker build -t $IMAGE_NAME:$IMAGE_TAG ./app
+        run: |
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG ./app
 
-      - name: Push Docker image
-        run: docker push $IMAGE_NAME:$IMAGE_TAG
+      - name: Tag Docker image for ECR
+        run: |
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
       - name: Checkout GitOps repository
         uses: actions/checkout@v4
@@ -51,8 +64,12 @@ jobs:
       - name: Update image tag in GitOps manifest
         run: |
           GITOPS_PATH="apps/demo-app/${{ inputs.environment }}/backend-deployment.yaml"
-          sed -i "s|image: ghcr.io/miguelsilva04/devship-demo-app:.*|image: $IMAGE_NAME:$IMAGE_TAG|g" gitops/$GITOPS_PATH
+          ECR_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          sed -i "s|image: .*devship-demo-app:.*|image: $ECR_IMAGE|g" gitops/$GITOPS_PATH
+
           echo "GITOPS_PATH=$GITOPS_PATH" >> $GITHUB_ENV
+          echo "ECR_IMAGE=$ECR_IMAGE" >> $GITHUB_ENV
 
       - name: Commit and push GitOps change
         run: |
@@ -60,5 +77,5 @@ jobs:
           git config user.name "devship-github-actions"
           git config user.email "devship-actions@users.noreply.github.com"
           git add $GITOPS_PATH
-          git commit -m "chore: deploy devship-demo-app $IMAGE_TAG to ${{ inputs.environment }}" || echo "No changes to commit"
+          git commit -m "chore: deploy $ECR_IMAGE to ${{ inputs.environment }}" || echo "No changes to commit"
           git push
