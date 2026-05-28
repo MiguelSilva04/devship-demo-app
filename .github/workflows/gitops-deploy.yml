@@ -1,0 +1,63 @@
+name: Build and update GitOps
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/miguelsilva04/devship-demo-app
+  GITOPS_REPO: MiguelSilva04/devship-gitops
+
+jobs:
+  build-and-update-gitops:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application repository
+        uses: actions/checkout@v4
+
+      - name: Define image tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Docker image
+        run: docker build -t $IMAGE_NAME:$IMAGE_TAG ./app
+
+      - name: Push Docker image
+        run: docker push $IMAGE_NAME:$IMAGE_TAG
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Update image tag in GitOps manifest
+        run: |
+          GITOPS_PATH="apps/demo-app/${{ inputs.environment }}/backend-deployment.yaml"
+          sed -i "s|image: ghcr.io/miguelsilva04/devship-demo-app:.*|image: $IMAGE_NAME:$IMAGE_TAG|g" gitops/$GITOPS_PATH
+          echo "GITOPS_PATH=$GITOPS_PATH" >> $GITHUB_ENV
+
+      - name: Commit and push GitOps change
+        run: |
+          cd gitops
+          git config user.name "devship-github-actions"
+          git config user.email "devship-actions@users.noreply.github.com"
+          git add $GITOPS_PATH
+          git commit -m "chore: deploy devship-demo-app $IMAGE_TAG to ${{ inputs.environment }}" || echo "No changes to commit"
+          git push
