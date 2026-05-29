@@ -11,6 +11,17 @@ on:
           - dev
           - staging
           - prod
+      action:
+        description: "Deploy action"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - rollback
+      rollback_tag:
+        description: "Rollback image tag"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -29,8 +40,19 @@ jobs:
       - name: Checkout application repository
         uses: actions/checkout@v4
 
+      - name: Validate rollback tag
+        if: ${{ inputs.action == 'rollback' && inputs.rollback_tag == '' }}
+        run: |
+          echo "rollback_tag is required when action is rollback"
+          exit 1
+
       - name: Define image tag
-        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        run: |
+          if [ "${{ inputs.action }}" = "rollback" ]; then
+            echo "IMAGE_TAG=${{ inputs.rollback_tag }}" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -43,17 +65,19 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build Docker image
+        if: ${{ inputs.action == 'deploy' }}
         run: |
           docker build -t $ECR_REPOSITORY:$IMAGE_TAG ./app
 
       - name: Tag Docker image for ECR
+        if: ${{ inputs.action == 'deploy' }}
         run: |
           docker tag $ECR_REPOSITORY:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
       - name: Push Docker image to ECR
+        if: ${{ inputs.action == 'deploy' }}
         run: |
           docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
-
       - name: Checkout GitOps repository
         uses: actions/checkout@v4
         with:
@@ -77,5 +101,5 @@ jobs:
           git config user.name "devship-github-actions"
           git config user.email "devship-actions@users.noreply.github.com"
           git add $GITOPS_PATH
-          git commit -m "chore: deploy $ECR_IMAGE to ${{ inputs.environment }}" || echo "No changes to commit"
+          git commit -m "chore: ${{ inputs.action }} $ECR_IMAGE to ${{ inputs.environment }}" || echo "No changes to commit"
           git push
