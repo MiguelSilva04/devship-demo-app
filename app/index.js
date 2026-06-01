@@ -3,10 +3,15 @@ const port = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
   res.statusCode = 200;
-  const msg = 'Hello World how are you!\n'
+  const msg = 'Hello World how are you!\n';
   res.end(msg);
 });
 
 server.listen(port, () => {
   console.log(`Server running on http://localhost:${port}/`);
 });
+
+setTimeout(() => {
+  console.log("Forcing crash for DevShip test");
+  process.exit(1);
+}, 10000);
